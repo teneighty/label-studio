@@ -728,12 +728,14 @@ class DownloadStorageData(APIView):
         filepath = unquote(request.GET['filepath'])
 
         url = None
+        file_name = None
         if filepath.startswith(settings.UPLOAD_DIR):
             logger.debug(f'Fetch uploaded file by user {request.user} => {filepath}')
             file_upload = FileUpload.objects.filter(file=filepath).last()
 
             if file_upload is not None and file_upload.has_permission(request.user):
                 url = file_upload.file.storage.url(file_upload.file.name, storage_url=True)
+                file_name = file_upload.file.name
         elif filepath.startswith(settings.AVATAR_PATH):
             user = User.objects.filter(avatar=filepath).first()
             if user is not None and request.user.active_organization.has_user(user):
@@ -742,16 +744,19 @@ class DownloadStorageData(APIView):
         if url is None:
             return Response(status=status.HTTP_403_FORBIDDEN)
 
-        protocol = urlparse(url).scheme
+        if settings.USE_NGINX_FOR_EXPORT_DOWNLOADS:
+            protocol = urlparse(url).scheme
 
-        # Let NGINX handle it
-        response = HttpResponse()
-        # The below header tells NGINX to catch it and serve, see docker-config/nginx-app.conf
-        redirect = '/file_download/' + protocol + '/' + url.replace(protocol + '://', '')
+            # Let NGINX handle it
+            response = HttpResponse()
+            # The below header tells NGINX to catch it and serve, see docker-config/nginx-app.conf
+            redirect = '/file_download/' + protocol + '/' + url.replace(protocol + '://', '')
 
-        response['X-Accel-Redirect'] = redirect
-        response['Content-Disposition'] = 'attachment; filename="{}"'.format(filepath)
-        return response
+            response['X-Accel-Redirect'] = redirect
+            response['Content-Disposition'] = 'attachment; filename="{}"'.format(filepath)
+            return response
+        else:
+            return HttpResponseRedirect(redirect_to=url, status=status.HTTP_303_SEE_OTHER)
 
 
 class PresignAPIMixin:
